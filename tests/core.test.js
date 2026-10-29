@@ -188,10 +188,17 @@ test('parseEmail reads text copied from Outlook', () => {
   assert.equal(Core.parseEmail('just some words').valid, false);
 });
 
-test('parseLooseDate handles Australian numeric dates', () => {
-  assert.equal(new Date(Core.parseLooseDate('Tue 28/10/2026 2:05 PM')).getTime(), new Date(2026, 9, 28, 14, 5).getTime());
-  assert.equal(new Date(Core.parseLooseDate('Tue 28/10/2026 12:05 AM')).getTime(), new Date(2026, 9, 28, 0, 5).getTime());
+test('parseLooseDate reads zone-less Outlook dates as local, day first', () => {
+  const at = (s) => new Date(Core.parseLooseDate(s)).getTime();
+  assert.equal(at('Tue 28/10/2026 2:05 PM'), new Date(2026, 9, 28, 14, 5).getTime());
+  assert.equal(at('Tue 28/10/2026 12:05 AM'), new Date(2026, 9, 28, 0, 5).getTime());
+  assert.equal(at('Mon 5/10/2026 9:14 AM'), new Date(2026, 9, 5, 9, 14).getTime(), 'day <= 12 must not be read month-first');
+  assert.equal(at('Monday, 5 October 2026 9:14 am'), new Date(2026, 9, 5, 9, 14).getTime());
+  assert.equal(at('Monday, October 5, 2026 at 9:14 p.m.'), new Date(2026, 9, 5, 21, 14).getTime());
+  assert.equal(at('5 Oct 2026'), new Date(2026, 9, 5).getTime());
+  assert.equal(Core.parseLooseDate('Mon, 05 Oct 2026 09:14:00 +1000'), '2026-10-04T23:14:00.000Z', 'zoned RFC 2822 keeps its zone');
   assert.equal(Core.parseLooseDate('not a date'), null);
+  assert.equal(Core.parseLooseDate('31 Foo 2026'), null);
 });
 
 test('mergeGraphMessages adds new and preserves tracking on re-sync', () => {

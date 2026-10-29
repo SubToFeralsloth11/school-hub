@@ -348,22 +348,39 @@
     return { plain: '', html: '' };
   }
 
-  /* Dates as found in .eml files and in text copied out of Outlook
-     ("Tuesday, 28 October 2026 9:14 AM", "Tue 28/10/2026 9:14 AM"). */
+  var MONTH_INDEX = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+  function clockHours(hours, ampm) {
+    var h = hours ? +hours : 0;
+    if (ampm) h = (h % 12) + (/p/i.test(ampm) ? 12 : 0);
+    return h;
+  }
+
+  /* Dates as found in .eml files (RFC 2822, with a zone) and in text copied out of Outlook,
+     which has no zone and is local time: "Tuesday, 28 October 2026 9:14 AM",
+     "Tue 5/10/2026 9:14 AM" (day first, as in Australia), "October 28, 2026 9:14 AM".
+     Zone-less forms are parsed by hand: browsers disagree on them and read 5/10 as May 10. */
   function parseLooseDate(value) {
     var s = String(value || '').trim();
     if (!s) return null;
-    var d = new Date(s);
-    if (!isNaN(d)) return d.toISOString();
-    var cleaned = s.replace(/^[A-Za-z]+,?\s+/, '').replace(/\s+at\s+/i, ' ');
-    var au = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*([AaPp][Mm])?)?/.exec(cleaned);
-    if (au) {
-      var h = au[4] ? +au[4] : 0;
-      if (au[6]) h = (h % 12) + (/p/i.test(au[6]) ? 12 : 0);
-      d = new Date(+au[3], +au[2] - 1, +au[1], h, au[5] ? +au[5] : 0);
-      return isNaN(d) ? null : d.toISOString();
+    var d;
+    if (/(\d{4}-\d{2}-\d{2}T)|([+-]\d{4}\b)|\b(GMT|UTC)\b|Z$/.test(s)) {
+      d = new Date(s);
+      if (!isNaN(d)) return d.toISOString();
     }
-    d = new Date(cleaned);
+    var cleaned = s.replace(/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+/i, '').replace(/,?\s+at\s+/i, ' ').replace(/,/g, ' ').replace(/\s+/g, ' ');
+    var time = '(?:\\s+(\\d{1,2}):(\\d{2})(?::\\d{2})?\\s*([AaPp]\\.?[Mm]\\.?)?)?';
+    var m = new RegExp('^(\\d{1,2})/(\\d{1,2})/(\\d{4})' + time).exec(cleaned);
+    if (m) d = new Date(+m[3], +m[2] - 1, +m[1], clockHours(m[4], m[6]), m[5] ? +m[5] : 0);
+    if (!m) {
+      m = new RegExp('^(\\d{1,2}) ([A-Za-z]{3})[A-Za-z]* (\\d{4})' + time).exec(cleaned);
+      if (m && MONTH_INDEX[m[2].toLowerCase()] !== undefined) d = new Date(+m[3], MONTH_INDEX[m[2].toLowerCase()], +m[1], clockHours(m[4], m[6]), m[5] ? +m[5] : 0);
+    }
+    if (!d) {
+      m = new RegExp('^([A-Za-z]{3})[A-Za-z]* (\\d{1,2}) (\\d{4})' + time).exec(cleaned);
+      if (m && MONTH_INDEX[m[1].toLowerCase()] !== undefined) d = new Date(+m[3], MONTH_INDEX[m[1].toLowerCase()], +m[2], clockHours(m[4], m[6]), m[5] ? +m[5] : 0);
+    }
+    if (!d) d = new Date(s);
     return isNaN(d) ? null : d.toISOString();
   }
 

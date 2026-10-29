@@ -175,9 +175,12 @@
     commit();
   });
 
+  // Close on a backdrop click, but not when a text selection that started inside the dialog ends outside it.
+  var pressedOnBackdrop = false;
+  dialog.addEventListener('mousedown', function (e) { pressedOnBackdrop = e.target === dialog; });
   dialog.addEventListener('click', function (e) {
     if (e.target.closest('[data-close]')) closeModal();
-    else if (e.target === dialog) closeModal(); // click on backdrop
+    else if (e.target === dialog && pressedOnBackdrop) closeModal();
   });
   dialog.addEventListener('close', function () { modal = null; });
   document.getElementById('modal-delete').addEventListener('click', function () {
@@ -432,20 +435,21 @@
       return;
     }
     ui.syncing = true;
-    render();
+    refresh();
     G.fetchInbox(graphConfig(), 50).then(function (res) {
       var merged = C.mergeGraphMessages(state.emails, res.messages);
       state.emails = merged.emails;
       state.settings.lastSync = new Date().toISOString();
       ui.syncing = false;
-      commit();
+      save();
+      refresh();
       if (res.account && res.account !== state.settings.email.toLowerCase()) {
         toast('Signed in as ' + res.account + ', not ' + state.settings.email + '.', { error: true, sticky: true });
       }
       if (!quiet || merged.added) toast(merged.added ? merged.added + ' new email' + (merged.added === 1 ? '' : 's') + ' from Outlook.' : 'Outlook is up to date.');
     }).catch(function (err) {
       ui.syncing = false;
-      render();
+      refresh();
       if (!quiet || !G.signedIn()) toast(err.message, { error: true, sticky: true });
     });
   }
@@ -457,13 +461,19 @@
     if (!due.length) return;
     due.forEach(function (r) {
       r.notifiedFor = r.due;
-      toast('⏰ ' + r.title, { sticky: true, action: { label: 'Done', run: function () { completeReminder(r.id); } } });
+      var firedFor = r.due;
+      toast('⏰ ' + r.title, { sticky: true, action: { label: 'Done', run: function () {
+        // Only if it is still this occurrence and not already ticked off elsewhere.
+        var current = find('reminders', r.id);
+        if (current && !current.done && current.due === firedFor) completeReminder(r.id);
+      } } });
       if (window.Notification && Notification.permission === 'granted') {
         try { new Notification('Reminder', { body: r.title, icon: 'icon.svg', tag: r.id }); }
         catch (e) { /* Android Chrome needs a service worker for notifications; the toast above still shows. */ }
       }
     });
-    commit();
+    save();
+    refresh();
   }
 
   function completeReminder(id) {
@@ -663,8 +673,8 @@
 
   views.email = function () {
     var q = ui.mailQuery;
-    var list = state.emails.filter(function (e) {
-      if (ui.eqOnly && !/(^|\.)eq\.edu\.au$/.test(C.emailDomain(e.from))) return false;
+    var pool = state.emails.filter(function (e) { return !ui.eqOnly || /(^|\.)eq\.edu\.au$/.test(C.emailDomain(e.from)); });
+    var list = pool.filter(function (e) {
       if (ui.mailFilter === 'open' && e.status === 'done') return false;
       if (ui.mailFilter !== 'open' && ui.mailFilter !== 'all' && e.status !== ui.mailFilter) return false;
       return C.matches(e, q, ['subject', 'from', 'fromName', 'preview', 'note']);
@@ -677,7 +687,7 @@
       notice = '<div class="notice">Want emails from <b>' + h(state.settings.email) + '</b> to appear automatically? <a href="#settings">Connect Outlook in Settings</a>. ' +
         'Until then, import <b>.eml</b> files or paste emails.</div>';
     }
-    var syncLabel = ui.syncing ? 'Syncing…' : outlookReady() && G.signedIn() ? '⟳ Sync Outlook' : '⟳ Connect Outlook';
+    var syncLabel = ui.syncing ? 'Syncing…' : !G.canRun() ? '⟳ Outlook sync (web version)' : outlookReady() && G.signedIn() ? '⟳ Sync Outlook' : '⟳ Connect Outlook';
     return '<div class="page-head"><div><h1>Email</h1><p class="sub">Tracking mail for <b>' + h(state.settings.email) + '</b>' +
       (state.settings.lastSync ? ' · synced ' + h(C.formatDue(state.settings.lastSync)) : '') + '</p></div></div>' +
       notice +
@@ -690,7 +700,7 @@
       '</div>' +
       '<div class="row" style="margin-bottom:6px"><div class="chips scroll-chips">' +
       [['open', 'Open'], ['new', 'New'], ['reply', 'Needs reply'], ['waiting', 'Waiting'], ['done', 'Done'], ['all', 'All']].map(function (f) {
-        var n = f[0] === 'all' ? state.emails.length : state.emails.filter(function (e) { return f[0] === 'open' ? e.status !== 'done' : e.status === f[0]; }).length;
+        var n = f[0] === 'all' ? pool.length : pool.filter(function (e) { return f[0] === 'open' ? e.status !== 'done' : e.status === f[0]; }).length;
         return '<button class="chip' + (ui.mailFilter === f[0] ? ' on' : '') + '" data-action="mail-filter" data-filter="' + f[0] + '">' + f[1] + ' ' + n + '</button>';
       }).join('') +
       '<button class="chip' + (ui.eqOnly ? ' on' : '') + '" data-action="toggle-eq" title="Only show mail sent from Education Queensland addresses">From @eq.edu.au only</button>' +
@@ -759,10 +769,26 @@
     else document.documentElement.setAttribute('data-theme', state.settings.theme);
   }
 
+  /* Stable key for a form control across re-renders (id, or form + field name). */
+  function fieldKey(el) {
+    if (el.id) return '#' + el.id;
+    if (!el.name) return null;
+    var form = el.closest('form[data-submit]');
+    return (form ? form.getAttribute('data-submit') : '') + ':' + el.name;
+  }
+
+  function findField(key) {
+    var fields = main.querySelectorAll('input, textarea, select');
+    for (var i = 0; i < fields.length; i++) if (fieldKey(fields[i]) === key) return fields[i];
+    return null;
+  }
+
   function render() {
     var view = currentView();
     var active = document.activeElement;
-    var keepFocus = active && main.contains(active) && active.id ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+    var focusKey = active && main.contains(active) ? fieldKey(active) : null;
+    var selection = null;
+    try { selection = focusKey ? { start: active.selectionStart, end: active.selectionEnd } : null; } catch (e) { selection = null; }
     main.innerHTML = views[view]();
     document.querySelectorAll('.nav a').forEach(function (a) {
       var on = a.getAttribute('data-view') === view;
@@ -775,13 +801,26 @@
     badge.textContent = fresh > 99 ? '99+' : String(fresh);
     document.title = (view === 'today' ? '' : view.charAt(0).toUpperCase() + view.slice(1) + ' · ') + 'School Hub';
     applyTheme();
-    if (keepFocus) {
-      var el = document.getElementById(keepFocus.id);
-      if (el) {
-        el.focus();
-        try { el.setSelectionRange(keepFocus.start, keepFocus.end); } catch (e) { /* not a text input */ }
-      }
+    var el = focusKey && findField(focusKey);
+    if (el) {
+      el.focus();
+      try { if (selection) el.setSelectionRange(selection.start, selection.end); } catch (e) { /* not a text input */ }
     }
+  }
+
+  /* Re-render for changes the user didn't make (reminder firing, sync, other tab),
+     keeping anything half-typed into text fields on the page. */
+  function refresh() {
+    var typed = {};
+    main.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea').forEach(function (el) {
+      var key = fieldKey(el);
+      if (key) typed[key] = el.value;
+    });
+    render();
+    Object.keys(typed).forEach(function (key) {
+      var el = findField(key);
+      if (el && el.value !== typed[key]) el.value = typed[key];
+    });
   }
 
   function newForView() {
@@ -941,7 +980,7 @@
   });
 
   window.addEventListener('hashchange', function () { closeModal(); render(); window.scrollTo(0, 0); });
-  window.addEventListener('storage', function (e) { if (e.key === C.STORAGE_KEY) { state = load(); render(); } });
+  window.addEventListener('storage', function (e) { if (e.key === C.STORAGE_KEY) { state = load(); refresh(); } });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'visible') return;
