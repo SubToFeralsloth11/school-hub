@@ -809,18 +809,25 @@
   }
 
   /* Re-render for changes the user didn't make (reminder firing, sync, other tab),
-     keeping anything half-typed into text fields on the page. */
+     keeping anything the user has half-typed (fields whose value differs from what was rendered). */
   function refresh() {
     var typed = {};
     main.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea').forEach(function (el) {
       var key = fieldKey(el);
-      if (key) typed[key] = el.value;
+      if (key && el.value !== el.defaultValue) typed[key] = el.value;
     });
+    var active = document.activeElement;
+    var caret = null;
+    try { caret = active && main.contains(active) ? [active.selectionStart, active.selectionEnd] : null; } catch (e) { caret = null; }
     render();
     Object.keys(typed).forEach(function (key) {
       var el = findField(key);
       if (el && el.value !== typed[key]) el.value = typed[key];
     });
+    var focused = document.activeElement;
+    if (caret && caret[0] != null && main.contains(focused)) {
+      try { focused.setSelectionRange(caret[0], caret[1]); } catch (e) { /* not a text input */ }
+    }
   }
 
   function newForView() {
