@@ -1,0 +1,6 @@
+{
+  "name": "school-hub",
+  "private": true,
+  "description": "Notes, reminders, school tracker and email tracker in one static web app",
+  "scripts": { "test": "node --test tests/*.test.js" }
+}
