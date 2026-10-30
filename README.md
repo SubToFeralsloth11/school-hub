@@ -15,7 +15,7 @@ Data is saved in the browser (`localStorage`) on each device separately. The fil
 | --- | --- |
 | Today | Overdue, due-today and next-7-days counts. Shows everything coming up (reminders, school tasks, email follow-ups), pinned notes and emails that need dealing with. |
 | Notes | Notes with titles, colours, tags, pinning and search. |
-| Reminders | Date/time reminders that can repeat daily, weekly or monthly. They pop up in the app when due, and as system notifications if you turn alerts on. Marking a repeating reminder done moves it to the next occurrence. |
+| Reminders | Date/time reminders that can repeat daily, weekly or monthly. They pop up in the app when due and, with alerts on, as system notifications through a service worker (`sw.js`), so they also fire while the app is in the background or another tab. Tapping one opens the app. There's no server, so the app must still be open somewhere. On iPhone, add it to the Home Screen first. Marking a repeating reminder done moves it to the next occurrence. |
 | School | Subjects (teacher, room, colour) and tasks: assignments, exams, homework and projects, each with a due date, status and mark. Shows each subject's average from marks like `18/20` or `85%`. |
 | Email | Tracks emails for `tgrim43@eq.edu.au`. Each email gets a status (New, Needs reply, Waiting, Done), a follow-up date, a linked subject and notes. You can filter to mail sent from `@eq.edu.au` addresses. |
 | Settings | Your name and email, theme (system, light or dark), alerts, Outlook connection, and backup/restore. |

@@ -456,6 +456,20 @@
 
   /* ---------- reminders firing ---------- */
 
+  // Registered on the hosted site at start-up. Phones ignore `new Notification()` (Android Chrome throws,
+  // iPhone has no constructor), so system alerts must go through the service worker registration.
+  var swRegistration = null;
+
+  function systemNotify(title, body, tag) {
+    if (!window.Notification || Notification.permission !== 'granted') return;
+    var opts = { body: body, icon: 'icon.svg', badge: 'icon.svg', tag: tag, renotify: true, requireInteraction: true };
+    function viaPage() {
+      try { new Notification(title, opts); } catch (e) { /* no page notifications here; the in-app toast still shows */ }
+    }
+    if (!swRegistration) return viaPage();
+    swRegistration.then(function (reg) { return reg.showNotification(title, opts); }).catch(viaPage);
+  }
+
   function checkReminders() {
     var due = C.dueReminders(state.reminders, new Date());
     if (!due.length) return;
@@ -467,10 +481,7 @@
         var current = find('reminders', r.id);
         if (current && !current.done && current.due === firedFor) completeReminder(r.id);
       } } });
-      if (window.Notification && Notification.permission === 'granted') {
-        try { new Notification('Reminder', { body: r.title, icon: 'icon.svg', tag: r.id }); }
-        catch (e) { /* Android Chrome needs a service worker for notifications; the toast above still shows. */ }
-      }
+      systemNotify('Reminder', r.title, r.id);
     });
     save();
     refresh();
@@ -715,7 +726,7 @@
   views.settings = function () {
     var s = state.settings;
     var perm = window.Notification ? Notification.permission : 'unsupported';
-    var permText = { granted: 'On', denied: 'Blocked in your browser settings', 'default': 'Off', unsupported: 'Not supported in this browser' }[perm];
+    var permText = { granted: 'On', denied: 'Blocked in your browser settings', 'default': 'Off', unsupported: 'Not supported here (on iPhone: Share → Add to Home Screen, then open it from there)' }[perm];
     var signed = G.signedIn();
     return '<div class="page-head"><h1>Settings</h1></div><div class="settings">' +
       '<form class="card" data-submit="profile"><h3>You</h3>' +
@@ -727,7 +738,8 @@
       field('Theme', '<select data-change="theme">' + options({ system: 'Match device', light: 'Light', dark: 'Dark' }, s.theme) + '</select>') +
       '<div class="field"><span class="muted small" style="display:block;font-weight:600;margin-bottom:5px">Reminder alerts</span>' +
       '<div class="row"><span>' + h(permText) + '</span>' + (perm === 'default' ? '<button class="btn small" data-action="enable-notifications">Turn on</button>' : '') + '</div></div>' +
-      '</div><p class="muted small" style="margin:0">Reminders pop up inside the app while it is open. With alerts on, your computer also shows a notification.</p></section>' +
+      '</div><p class="muted small" style="margin:0">With alerts on, reminders show as phone or computer notifications even while School Hub is in the background or in another tab. ' +
+      'School Hub has no server, so it must still be open somewhere (a tab, or the home-screen app not swiped away) for alerts to fire.</p></section>' +
 
       '<form class="card" data-submit="outlook"><h3>Outlook email (' + h(s.email) + ')</h3>' +
       '<p class="small" style="margin-top:0">Status: <b>' + (!G.canRun() ? 'unavailable when opened from a file — use the GitHub Pages version' : signed ? 'signed in' : s.msClientId ? 'ready to sign in' : 'not set up') + '</b></p>' +
@@ -1003,6 +1015,10 @@
     manifest.rel = 'manifest';
     manifest.href = 'manifest.webmanifest';
     document.head.appendChild(manifest);
+    if ('serviceWorker' in navigator) {
+      swRegistration = navigator.serviceWorker.register('sw.js').then(function () { return navigator.serviceWorker.ready; });
+      swRegistration.catch(function () { swRegistration = null; });
+    }
   }
 
   render();
